@@ -1,24 +1,45 @@
+-- Services
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
+
 local player = Players.LocalPlayer
 local mouse = player:GetMouse()
 
+-- GUI + tool control
 local guiName = "MultiTabJanToolGUI"
 local toggleName = "ToggleJanToolGUI"
+local connections = {} -- To disconnect on F2
 
--- Creates the GUI
-local function createGui()
+-- Self-destruct handler (F2 to kill)
+local function killScript()
     if game.CoreGui:FindFirstChild(guiName) then
-        return game.CoreGui[guiName]
+        game.CoreGui[guiName]:Destroy()
     end
+    if game.CoreGui:FindFirstChild(toggleName) then
+        game.CoreGui[toggleName]:Destroy()
+    end
+    -- Disconnect any leftover connections
+    for _, conn in ipairs(connections) do
+        pcall(function() conn:Disconnect() end)
+    end
+end
 
-    local screenGui = Instance.new("ScreenGui")
+-- Listen for F2 to destroy everything
+table.insert(connections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if input.KeyCode == Enum.KeyCode.F2 then
+        killScript()
+    end
+end))
+
+-- Create GUI
+local function createGui()
+    if game.CoreGui:FindFirstChild(guiName) then return end
+
+    local screenGui = Instance.new("ScreenGui", game.CoreGui)
     screenGui.Name = guiName
     screenGui.ResetOnSpawn = false
-    screenGui.Parent = game.CoreGui
 
-    -- Main draggable frame
     local frame = Instance.new("Frame", screenGui)
     frame.Size = UDim2.new(0, 500, 0, 400)
     frame.Position = UDim2.new(0.5, -250, 0.5, -200)
@@ -26,13 +47,11 @@ local function createGui()
     frame.Active = true
     Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 12)
 
-    -- Drag bar
     local dragBar = Instance.new("Frame", frame)
     dragBar.Size = UDim2.new(1, 0, 0, 40)
     dragBar.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
     Instance.new("UICorner", dragBar).CornerRadius = UDim.new(0, 12)
 
-    -- Title label
     local title = Instance.new("TextLabel", dragBar)
     title.Text = "Jan Tool GUI"
     title.Size = UDim2.new(1, -40, 1, 0)
@@ -43,7 +62,6 @@ local function createGui()
     title.TextSize = 20
     title.TextXAlignment = Enum.TextXAlignment.Left
 
-    -- X close button
     local closeBtn = Instance.new("TextButton", dragBar)
     closeBtn.Size = UDim2.new(0, 30, 0, 30)
     closeBtn.Position = UDim2.new(1, -35, 0, 5)
@@ -53,18 +71,17 @@ local function createGui()
     closeBtn.Font = Enum.Font.GothamBold
     closeBtn.TextSize = 18
     Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 8)
+    closeBtn.MouseButton1Click:Connect(function() screenGui.Enabled = false end)
 
-    -- Tab bar
+    -- Tabs
     local tabBar = Instance.new("Frame", frame)
     tabBar.Size = UDim2.new(1, 0, 0, 40)
     tabBar.Position = UDim2.new(0, 0, 0, 50)
     tabBar.BackgroundTransparency = 1
     local layout = Instance.new("UIListLayout", tabBar)
     layout.FillDirection = Enum.FillDirection.Horizontal
-    layout.Padding = UDim.new(0, 0)
     layout.SortOrder = Enum.SortOrder.LayoutOrder
 
-    -- Content scroll area
     local scroll = Instance.new("ScrollingFrame", frame)
     scroll.Size = UDim2.new(1, -20, 1, -100)
     scroll.Position = UDim2.new(0, 10, 0, 100)
@@ -76,8 +93,6 @@ local function createGui()
     local innerLayout = Instance.new("UIListLayout", scroll)
     innerLayout.Padding = UDim.new(0, 6)
     innerLayout.SortOrder = Enum.SortOrder.LayoutOrder
-
-    local tabNames = {"Main","Troll","Avatar","Tools"}
 
     local function clear()
         for _, c in pairs(scroll:GetChildren()) do
@@ -112,21 +127,22 @@ local function createGui()
                     local moving = false
 
                     tool.Equipped:Connect(function()
-                        RunService.RenderStepped:Connect(function()
+                        local moveConn
+                        moveConn = RunService.RenderStepped:Connect(function()
                             if selectedPart and moving then
                                 local ray = workspace.CurrentCamera:ScreenPointToRay(mouse.X, mouse.Y)
                                 local newPos = ray.Origin + ray.Direction * 20 + offset
-                                selectedPart.Position = newPos
+                                if selectedPart and not selectedPart.Anchored then
+                                    selectedPart.Position = newPos
+                                end
                             end
                         end)
+                        table.insert(connections, moveConn)
                     end)
 
                     mouse.Button1Down:Connect(function()
-                        if tool.Parent == player.Character and mouse.Target and mouse.Target:IsA("BasePart") then
+                        if tool.Parent == player.Character and mouse.Target and mouse.Target:IsA("BasePart") and not mouse.Target.Anchored then
                             selectedPart = mouse.Target
-                            if selectedPart.Anchored then
-                                selectedPart.Anchored = false
-                            end
                             selectedPart:SetNetworkOwner(player)
                             offset = selectedPart.Position - mouse.Hit.Position
                             moving = true
@@ -151,9 +167,10 @@ local function createGui()
         end
     end
 
+    local tabNames = {"Main", "Troll", "Avatar", "Tools"}
     for _, name in ipairs(tabNames) do
         local btn = Instance.new("TextButton", tabBar)
-        btn.Size = UDim2.new(1/#tabNames,0,1,0)
+        btn.Size = UDim2.new(1/#tabNames, 0, 1, 0)
         btn.Text = name
         btn.BackgroundColor3 = Color3.fromRGB(80,80,90)
         btn.TextColor3 = Color3.new(1,1,1)
@@ -167,52 +184,51 @@ local function createGui()
 
     populate("Main")
 
-    -- Draggable logic
-    local dragging, startPos, dragStart
-    dragBar.InputBegan:Connect(function(inp)
-        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+    -- Dragging
+    local dragging = false
+    local dragStart, startPos
+    dragBar.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
             dragging = true
-            dragStart = inp.Position
+            dragStart = input.Position
             startPos = frame.Position
-            inp.Changed:Connect(function() if inp.UserInputState == Enum.UserInputState.End then dragging = false end end)
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then
+                    dragging = false
+                end
+            end)
         end
     end)
-    UserInputService.InputChanged:Connect(function(inp)
-        if dragging and inp.UserInputType == Enum.UserInputType.MouseMovement then
-            local delta = inp.Position - dragStart
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = input.Position - dragStart
             frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
         end
     end)
-
-    closeBtn.MouseButton1Click:Connect(function()
-        screenGui.Enabled = false
-        local toggle = game.CoreGui:FindFirstChild(toggleName)
-        if toggle then toggle.ToggleButton.Text = "Open GUI" end
-    end)
-
-    return screenGui
 end
 
--- Toggle button
+-- GUI Toggle Button
 local function createToggle()
     if game.CoreGui:FindFirstChild(toggleName) then return end
-    local togglegui = Instance.new("ScreenGui", game.CoreGui)
-    togglegui.Name = toggleName
-    local btn = Instance.new("TextButton", togglegui)
+
+    local toggleGui = Instance.new("ScreenGui", game.CoreGui)
+    toggleGui.Name = toggleName
+
+    local btn = Instance.new("TextButton", toggleGui)
     btn.Name = "ToggleButton"
-    btn.Size = UDim2.new(0,120,0,40)
-    btn.Position = UDim2.new(0,10,1,-50)
-    btn.BackgroundColor3 = Color3.fromRGB(70,130,180)
+    btn.Size = UDim2.new(0, 120, 0, 40)
+    btn.Position = UDim2.new(0, 10, 1, -50)
+    btn.BackgroundColor3 = Color3.fromRGB(70, 130, 180)
     btn.Text = "Close GUI"
     btn.TextColor3 = Color3.new(1,1,1)
     btn.Font = Enum.Font.GothamBold
     btn.TextSize = 18
-    Instance.new("UICorner", btn).CornerRadius = UDim.new(0,8)
+    Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
 
-    local gui = createGui()
+    local mainGui = createGui()
     btn.MouseButton1Click:Connect(function()
-        gui.Enabled = not gui.Enabled
-        btn.Text = gui.Enabled and "Close GUI" or "Open GUI"
+        mainGui.Enabled = not mainGui.Enabled
+        btn.Text = mainGui.Enabled and "Close GUI" or "Open GUI"
     end)
 end
 
