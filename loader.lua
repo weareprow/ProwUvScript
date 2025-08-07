@@ -4,35 +4,87 @@ local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
-local mouse = player:GetMouse()
 
--- GUI + tool control
-local guiName = "MultiTabJanToolGUI"
+local guiName = "Prow Universal Script"
 local toggleName = "ToggleJanToolGUI"
-local connections = {} -- To disconnect on F2
+local connections = {}
 
--- Self-destruct handler (F2 to kill)
+-- Fly State
+local isFlying = false
+local flySpeed = 50
+local flyHotkey = Enum.KeyCode.F
+local flyGyro, flyVelocity
+
+-- Destroy everything on F2
 local function killScript()
-    if game.CoreGui:FindFirstChild(guiName) then
-        game.CoreGui[guiName]:Destroy()
-    end
-    if game.CoreGui:FindFirstChild(toggleName) then
-        game.CoreGui[toggleName]:Destroy()
-    end
-    -- Disconnect any leftover connections
-    for _, conn in ipairs(connections) do
-        pcall(function() conn:Disconnect() end)
-    end
+    if game.CoreGui:FindFirstChild(guiName) then game.CoreGui[guiName]:Destroy() end
+    if game.CoreGui:FindFirstChild(toggleName) then game.CoreGui[toggleName]:Destroy() end
+    for _, conn in ipairs(connections) do pcall(function() conn:Disconnect() end) end
+end
+-- Start Fly
+local function startFly()
+    local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    flyGyro = Instance.new("BodyGyro")
+    flyGyro.P = 9e4
+    flyGyro.MaxTorque = Vector3.new(9e9, 9e9, 9e9)
+    flyGyro.CFrame = hrp.CFrame
+    flyGyro.Parent = hrp
+
+    flyVelocity = Instance.new("BodyVelocity")
+    flyVelocity.Velocity = Vector3.new(0,0,0)
+    flyVelocity.MaxForce = Vector3.new(9e9, 9e9, 9e9)
+    flyVelocity.Parent = hrp
 end
 
--- Listen for F2 to destroy everything
-table.insert(connections, UserInputService.InputBegan:Connect(function(input, gameProcessed)
+-- Stop Fly
+local function stopFly()
+    if flyGyro then flyGyro:Destroy() flyGyro = nil end
+    if flyVelocity then flyVelocity:Destroy() flyVelocity = nil end
+end
+
+-- Fly Movement
+local function updateFly()
+    local cam = workspace.CurrentCamera
+    local moveVec = Vector3.new(0,0,0)
+
+    if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveVec = moveVec + cam.CFrame.LookVector end
+    if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveVec = moveVec - cam.CFrame.LookVector end
+    if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveVec = moveVec - cam.CFrame.RightVector end
+    if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveVec = moveVec + cam.CFrame.RightVector end
+    if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveVec = moveVec + Vector3.new(0,1,0) end
+    if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then moveVec = moveVec - Vector3.new(0,1,0) end
+
+    if flyVelocity then 
+        if moveVec.Magnitude > 0 then
+            flyVelocity.Velocity = moveVec.Unit * flySpeed
+        else
+            flyVelocity.Velocity = Vector3.new(0,0,0)
+        end
+    end
+    if flyGyro then flyGyro.CFrame = cam.CFrame end
+end
+-- Input connections
+table.insert(connections, UserInputService.InputBegan:Connect(function(input, processed)
+    if processed then return end
     if input.KeyCode == Enum.KeyCode.F2 then
         killScript()
+    elseif input.KeyCode == flyHotkey then
+        isFlying = not isFlying
+        if isFlying then
+            startFly()
+        else
+            stopFly()
+        end
     end
 end))
 
--- Create GUI
+table.insert(connections, RunService.RenderStepped:Connect(function()
+    if isFlying then
+        updateFly()
+    end
+end))
 local function createGui()
     if game.CoreGui:FindFirstChild(guiName) then return end
 
@@ -53,7 +105,7 @@ local function createGui()
     Instance.new("UICorner", dragBar).CornerRadius = UDim.new(0, 12)
 
     local title = Instance.new("TextLabel", dragBar)
-    title.Text = "Jan Tool GUI"
+    title.Text = "Prow Universal Script"
     title.Size = UDim2.new(1, -40, 1, 0)
     title.Position = UDim2.new(0, 10, 0, 0)
     title.BackgroundTransparency = 1
@@ -73,7 +125,7 @@ local function createGui()
     Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 8)
     closeBtn.MouseButton1Click:Connect(function() screenGui.Enabled = false end)
 
-    -- Tabs
+    -- Tab Bar
     local tabBar = Instance.new("Frame", frame)
     tabBar.Size = UDim2.new(1, 0, 0, 40)
     tabBar.Position = UDim2.new(0, 0, 0, 50)
@@ -82,6 +134,7 @@ local function createGui()
     layout.FillDirection = Enum.FillDirection.Horizontal
     layout.SortOrder = Enum.SortOrder.LayoutOrder
 
+    -- Scroll Frame
     local scroll = Instance.new("ScrollingFrame", frame)
     scroll.Size = UDim2.new(1, -20, 1, -100)
     scroll.Position = UDim2.new(0, 10, 0, 100)
@@ -93,7 +146,6 @@ local function createGui()
     local innerLayout = Instance.new("UIListLayout", scroll)
     innerLayout.Padding = UDim.new(0, 6)
     innerLayout.SortOrder = Enum.SortOrder.LayoutOrder
-
     local function clear()
         for _, c in pairs(scroll:GetChildren()) do
             if not c:IsA("UIListLayout") then
@@ -104,61 +156,70 @@ local function createGui()
 
     local function populate(tab)
         clear()
-        if tab == "Tools" then
-            local btn = Instance.new("TextButton", scroll)
-            btn.Size = UDim2.new(1, -10, 0, 50)
-            btn.Text = "Jan Tool"
-            btn.BackgroundColor3 = Color3.fromRGB(90, 90, 100)
-            btn.TextColor3 = Color3.new(1,1,1)
-            btn.Font = Enum.Font.GothamBold
-            btn.TextSize = 20
-            Instance.new("UICorner", btn).CornerRadius = UDim.new(0, 8)
+        if tab == "Player" then
+            local label = Instance.new("TextLabel", scroll)
+            label.Size = UDim2.new(1, -10, 0, 30)
+            label.Text = "Fly Controls:"
+            label.BackgroundTransparency = 1
+            label.TextColor3 = Color3.new(1,1,1)
+            label.Font = Enum.Font.GothamBold
+            label.TextSize = 16
 
-            btn.MouseButton1Click:Connect(function()
-                if not player.Backpack:FindFirstChild("JanTool") then
-                    local tool = Instance.new("Tool")
-                    tool.Name = "JanTool"
-                    tool.RequiresHandle = false
-                    tool.CanBeDropped = false
-                    tool.Parent = player.Backpack
+            local hotkeyBox = Instance.new("TextBox", scroll)
+            hotkeyBox.Size = UDim2.new(0.48, -5, 0, 30)
+            hotkeyBox.PlaceholderText = "Hotkey (e.g. F)"
+            hotkeyBox.Text = flyHotkey.Name
+            hotkeyBox.BackgroundColor3 = Color3.fromRGB(70,70,80)
+            hotkeyBox.TextColor3 = Color3.new(1,1,1)
+            hotkeyBox.Font = Enum.Font.Gotham
+            hotkeyBox.TextSize = 16
+            hotkeyBox.ClearTextOnFocus = false
+            hotkeyBox.FocusLost:Connect(function()
+                local val = hotkeyBox.Text:upper()
+                local newKey = Enum.KeyCode[val]
+                if newKey then flyHotkey = newKey end
+                hotkeyBox.Text = flyHotkey.Name
+            end)
 
-                    local selectedPart = nil
-                    local offset = Vector3.new()
-                    local moving = false
-
-                    tool.Equipped:Connect(function()
-                        local moveConn
-                        moveConn = RunService.RenderStepped:Connect(function()
-                            if selectedPart and moving then
-                                local ray = workspace.CurrentCamera:ScreenPointToRay(mouse.X, mouse.Y)
-                                local newPos = ray.Origin + ray.Direction * 20 + offset
-                                if selectedPart and not selectedPart.Anchored then
-                                    selectedPart.Position = newPos
-                                end
-                            end
-                        end)
-                        table.insert(connections, moveConn)
-                    end)
-
-                    mouse.Button1Down:Connect(function()
-                        if tool.Parent == player.Character and mouse.Target and mouse.Target:IsA("BasePart") and not mouse.Target.Anchored then
-                            selectedPart = mouse.Target
-                            selectedPart:SetNetworkOwner(player)
-                            offset = selectedPart.Position - mouse.Hit.Position
-                            moving = true
-                        end
-                    end)
-
-                    mouse.Button1Up:Connect(function()
-                        moving = false
-                        selectedPart = nil
-                    end)
+            local speedBox = Instance.new("TextBox", scroll)
+            speedBox.Size = UDim2.new(0.48, -5, 0, 30)
+            speedBox.Position = UDim2.new(0.52, 0, 0, 0)
+            speedBox.PlaceholderText = "Fly Speed"
+            speedBox.Text = tostring(flySpeed)
+            speedBox.BackgroundColor3 = Color3.fromRGB(70,70,80)
+            speedBox.TextColor3 = Color3.new(1,1,1)
+            speedBox.Font = Enum.Font.Gotham
+            speedBox.TextSize = 16
+            speedBox.ClearTextOnFocus = false
+            speedBox.FocusLost:Connect(function()
+                local val = tonumber(speedBox.Text)
+                if val and val > 0 and val <= 500 then
+                    flySpeed = val
                 end
+                speedBox.Text = tostring(flySpeed)
+            end)
+
+            local toggleFlyBtn = Instance.new("TextButton", scroll)
+            toggleFlyBtn.Size = UDim2.new(1, -10, 0, 30)
+            toggleFlyBtn.Position = UDim2.new(0, 0, 0, 40)
+            toggleFlyBtn.Text = isFlying and "Disable Fly" or "Enable Fly"
+            toggleFlyBtn.BackgroundColor3 = Color3.fromRGB(70,130,180)
+            toggleFlyBtn.TextColor3 = Color3.new(1,1,1)
+            toggleFlyBtn.Font = Enum.Font.GothamBold
+            toggleFlyBtn.TextSize = 18
+            toggleFlyBtn.MouseButton1Click:Connect(function()
+                isFlying = not isFlying
+                if isFlying then
+                    startFly()
+                else
+                    stopFly()
+                end
+                toggleFlyBtn.Text = isFlying and "Disable Fly" or "Enable Fly"
             end)
         else
             local label = Instance.new("TextLabel", scroll)
             label.Size = UDim2.new(1, -10, 0, 40)
-            label.Text = tab.." content"
+            label.Text = tab .. " content"
             label.BackgroundColor3 = Color3.fromRGB(70,70,80)
             label.TextColor3 = Color3.new(1,1,1)
             label.Font = Enum.Font.Gotham
@@ -167,7 +228,7 @@ local function createGui()
         end
     end
 
-    local tabNames = {"Main", "Troll", "Avatar", "Tools"}
+    local tabNames = {"Main", "Player", "Troll", "Avatar", "Tools"}
     for _, name in ipairs(tabNames) do
         local btn = Instance.new("TextButton", tabBar)
         btn.Size = UDim2.new(1/#tabNames, 0, 1, 0)
@@ -183,7 +244,6 @@ local function createGui()
     end
 
     populate("Main")
-
     -- Dragging
     local dragging = false
     local dragStart, startPos
@@ -205,9 +265,9 @@ local function createGui()
             frame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
         end
     end)
-end
 
--- GUI Toggle Button
+    return screenGui
+end
 local function createToggle()
     if game.CoreGui:FindFirstChild(toggleName) then return end
 
